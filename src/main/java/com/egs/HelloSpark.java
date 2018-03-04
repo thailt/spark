@@ -4,6 +4,7 @@ import com.egs.entity.Movie;
 import com.egs.entity.User;
 import com.egs.job.CsvParser;
 import com.egs.job.EventParser;
+import com.google.gson.Gson;
 import org.apache.spark.SparkConf;
 import org.apache.spark.SparkContext;
 import org.apache.spark.api.java.JavaRDD;
@@ -16,6 +17,7 @@ import org.apache.spark.sql.*;
 import org.apache.spark.sql.expressions.Window;
 
 import java.util.Arrays;
+import java.util.List;
 
 public class HelloSpark {
 
@@ -64,12 +66,17 @@ public class HelloSpark {
         Dataset<Rating> ratings = null;
         Dataset<Row> ratingRaw = eventRows.join(users, eventRows.col("accountid").equalTo(users.col("userCode")))
                                           .join(movies, eventRows.col("key").equalTo(movies.col("movieCode")))
-                                          .withColumn("rating", functions.lit(5f));
+                                          .withColumn("rating", functions.lit(new Double(5).doubleValue()));
 
-        ratings = ratingRaw.select("userId", "movieId", "rating")
+        System.out.println("null rating raw");
+        ratingRaw.filter("userId is null or movieId is null").show();
+
+        ratings = ratingRaw.select("userId", "movieId", "rating").filter("userId is not null and movieId is not null")
                            .withColumnRenamed("userId", "user")
                            .withColumnRenamed("movieId", "item")
                            .as(Encoders.bean(Rating.class));
+
+//        ratings.filter(rate -> rate==null).count();
 
         eventRows.printSchema();
         eventRows.show();
@@ -79,6 +86,9 @@ public class HelloSpark {
 
         ratings.show();
         ratings.printSchema();
+
+        List<Rating> ratingList = ratings.collectAsList();
+        System.out.println("rating list " + new Gson().toJson(ratingList));
 
         int rank = 10;
         int numIterations = 10;
@@ -99,40 +109,8 @@ public class HelloSpark {
 
         MatrixFactorizationModel.load(jsc.sc(), "target/tmp/myCollaborativeFilter");
 
-        //        JavaPairRDD<String, Long> accountIds = eventRows.select(col("accountid"))
-        //                                                        .distinct()
-        //                                                        .sort("accountid")
-        //                                                        .javaRDD()
-        //                                                        .map(row -> row.<String>getAs("accountid"))
-        //                                                        .zipWithIndex();
-        //
-        //        Dataset<Row> userDataset = sparkSession.createDataset(JavaPairRDD.toRDD(accountIds), Encoders.tuple
-        // (Encoders
-        //                .bean(String.class), Encoders
-        //                .bean(Long.class))).toDF("userCode", "userId");
-        //
-        //        accountIds.take(10).forEach(tuple2 -> System.out.println("accountId " + tuple2._1 + " value " +
-        // tuple2._2));
-        //
-        //        JavaPairRDD<String, Long> movieIds = eventRows.select(col("key"))
-        //                                                      .distinct()
-        //                                                      .sort(col("key"))
-        //                                                      .javaRDD()
-        //                                                      .map(row -> row.<String>getAs("key"))
-        //                                                      .zipWithUniqueId();
-        //
-        //        Dataset<Row> movieDataset = sparkSession.createDataset(JavaPairRDD.toRDD(movieIds), Encoders.tuple
-        // (Encoders
-        //                .bean(String.class), Encoders
-        //                .bean(Long.class))).toDF("moveCode", "movieId");
-        //
-        //        movieIds.take(10).forEach(tuple2 -> System.out.println("movieid " + tuple2._1 + " value " +
-        // tuple2._2));
 
-        //        eventRows.join(userDataset).join(movieDataset);
         System.out.println("event id:   " + eventRows.count());
-        //        System.out.println("account id: " + accountIds.count());
-        //        System.out.println("movie id:   " + movieIds.count());
 
         System.out.println("hello spark");
     }
