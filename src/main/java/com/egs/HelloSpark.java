@@ -8,12 +8,14 @@ import org.apache.spark.SparkConf;
 import org.apache.spark.SparkContext;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.api.java.function.MapFunction;
 import org.apache.spark.mllib.recommendation.ALS;
 import org.apache.spark.mllib.recommendation.MatrixFactorizationModel;
 import org.apache.spark.mllib.recommendation.Rating;
+import org.apache.spark.rdd.RDD;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.expressions.Window;
+
+import java.util.Arrays;
 
 public class HelloSpark {
 
@@ -31,15 +33,9 @@ public class HelloSpark {
 
         Dataset<Row> df = CsvParser.parse(jsc, path);
 
-        Dataset<Row> eventRows = EventParser.filter(df);
+        Dataset<Row> eventRows = EventParser.filter(df).drop("userid");
 
-        Dataset<User> userDataset1 = eventRows.map(new MapFunction<Row, User>() {
-            @Override
-            public User call(Row value) throws Exception {
-
-                return new User(value.<String>getAs("accountid"), 1);
-            }
-        }, Encoders.bean(User.class));
+        //        eventRows = eventRows.drop("userid");
 
         Dataset<User> users = eventRows.select("accountid")
                                        .withColumnRenamed("accountid", "userCode")
@@ -62,37 +58,47 @@ public class HelloSpark {
         movies.printSchema();
         movies.show();
 
+        eventRows.printSchema();
+        eventRows.show();
+
         Dataset<Rating> ratings = null;
         Dataset<Row> ratingRaw = eventRows.join(users, eventRows.col("accountid").equalTo(users.col("userCode")))
                                           .join(movies, eventRows.col("key").equalTo(movies.col("movieCode")))
-                                          .withColumn("rating", functions.lit(1f));
+                                          .withColumn("rating", functions.lit(5f));
 
         ratings = ratingRaw.select("userId", "movieId", "rating")
                            .withColumnRenamed("userId", "user")
                            .withColumnRenamed("movieId", "item")
                            .as(Encoders.bean(Rating.class));
 
-        //        ratingRaw.printSchema();
-        //        ratingRaw.show();
+        eventRows.printSchema();
+        eventRows.show();
+
+        ratingRaw.printSchema();
+        ratingRaw.show();
 
         ratings.show();
         ratings.printSchema();
 
         int rank = 10;
         int numIterations = 10;
-        MatrixFactorizationModel model = ALS.train(JavaRDD.toRDD(ratings.toJavaRDD()), rank, numIterations, 0.01);
+
+        RDD<Rating> ratingRdd = JavaRDD.toRDD(ratings.toJavaRDD());
+
+
+        MatrixFactorizationModel model = ALS.train(ratingRdd, rank, numIterations, 0.01);
 
         long start = System.currentTimeMillis();
         double predict = model.predict(3894, 84);
         long end = System.currentTimeMillis();
 
-        System.out.println("predict in " + (end-start) + "ms");
+        System.out.println("predict in " + (end - start) + "ms");
         System.out.println("predict for user 3894, item 84, rating 1.0, predict " + predict);
 
         model.save(sc, "target/tmp/myCollaborativeFilter");
 
         MatrixFactorizationModel.load(jsc.sc(), "target/tmp/myCollaborativeFilter");
-        //
+
         //        JavaPairRDD<String, Long> accountIds = eventRows.select(col("accountid"))
         //                                                        .distinct()
         //                                                        .sort("accountid")
